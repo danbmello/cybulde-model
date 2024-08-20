@@ -1,33 +1,41 @@
-# Make all targets .PHONY
-.PHONY: $(shell sed -n -e '/^$$/ { n ; /^[^ .\#][^ ]*:/ { s/:.*$$// ; p ; } ; }' $(MAKEFILE_LIST))
+.PHONY: all entrypoint notebook sort sort-check format format-check format-and-sort lint check-type-annotations test full-check build build-for-dependencies lock-dependencies up down exec-in
 
 SHELL = /usr/bin/env bash
-USER_NAME = $(shell whoami)
-USER_ID = $(shell id -u)
-HOST_NAME = $(shell hostname)
+USER_NAME = $(USERNAME)
+USER_ID = 1000
+HOST_NAME = $(COMPUTERNAME)
 
-ifeq (, $(shell which docker-compose))
-	DOCKER_COMPOSE_COMMAND = docker compose
-else
-	DOCKER_COMPOSE_COMMAND = docker-compose
-endif
+DOCKER_COMPOSE_COMMAND = docker-compose
 
 SERVICE_NAME = app
-CONTAINER_NAME = cybulde-template-container
+CONTAINER_NAME = cybulde-model-container
 
 DIRS_TO_VALIDATE = cybulde
 DOCKER_COMPOSE_RUN = $(DOCKER_COMPOSE_COMMAND) run --rm $(SERVICE_NAME)
 DOCKER_COMPOSE_EXEC = $(DOCKER_COMPOSE_COMMAND) exec $(SERVICE_NAME)
 
+# Local docker image name
+LOCAL_DOCKER_IMAGE_NAME = cybulde-data-processing
+
+# Docker image name
+GCP_DOCKER_IMAGE_NAME = southamerica-east1-docker.pkg.dev/cybulde-428517/cybulde/cybulde-data-processing
+
 export
 
 # Returns true if the stem is a non-empty environment variable, or else raises an error.
 guard-%:
-	@#$(or ${$*}, $(error $* is not set))
+	@echo off && \
+	setlocal enabledelayedexpansion && \
+	set VAR_NAME=$* && \
+	set VAR_VALUE=!%VAR_NAME%! && \
+	if "!VAR_VALUE!"=="" ( \
+	    echo $* is not set && \
+	    exit /b 1) && \
+	exit /b 0
 
-## Call entrypoint
-entrypoint: up
-	$(DOCKER_COMPOSE_EXEC) python ./cybulde/entrypoint.py
+## Run tasks
+local-run-tasks: up
+	$(DOCKER_COMPOSE_EXEC) python ./cybulde/run_tasks.py
 
 ## Starts jupyter lab
 notebook: up
@@ -72,9 +80,13 @@ full-check: lint check-type-annotations
 build:
 	$(DOCKER_COMPOSE_COMMAND) build $(SERVICE_NAME)
 
+## Builds docker image no cache
+build-no-cache:
+	$(DOCKER_COMPOSE_COMMAND) build $(SERVICE_NAME) --no-cache
+
 ## Remove poetry.lock and build docker image
 build-for-dependencies:
-	rm -f *.lock
+	powershell -Command "Remove-Item -Force *.lock"
 	$(DOCKER_COMPOSE_COMMAND) build $(SERVICE_NAME)
 
 ## Lock dependencies with poetry
@@ -112,41 +124,14 @@ exec-in: up
 # semicolon; see <http://stackoverflow.com/a/11799865/1968>
 .PHONY: help
 help:
-	@echo "$$(tput bold)Available rules:$$(tput sgr0)"
-	@echo
-	@sed -n -e "/^## / { \
-		h; \
-		s/.*//; \
-		:doc" \
-		-e "H; \
-		n; \
-		s/^## //; \
-		t doc" \
-		-e "s/:.*//; \
-		G; \
-		s/\\n## /---/; \
-		s/\\n/ /g; \
-		p; \
-	}" ${MAKEFILE_LIST} \
-	| LC_ALL='C' sort --ignore-case \
-	| awk -F '---' \
-		-v ncol=$$(tput cols) \
-		-v indent=36 \
-		-v col_on="$$(tput setaf 6)" \
-		-v col_off="$$(tput sgr0)" \
-	'{ \
-		printf "%s%*s%s ", col_on, -indent, $$1, col_off; \
-		n = split($$2, words, " "); \
-		line_length = ncol - indent; \
-		for (i = 1; i <= n; i++) { \
-			line_length -= length(words[i]) + 1; \
-			if (line_length <= 0) { \
-				line_length = ncol - indent - length(words[i]) - 1; \
-				printf "\n%*s ", -indent, " "; \
-			} \
-			printf "%s ", words[i]; \
+	@powershell -Command "Write-Output 'Available rules:'; \
+	Get-Content ${MAKEFILE_LIST} | ForEach-Object { \
+		if ($$_ -match '^## (.+)') { \
+			$$description = $$matches[1] \
+		} elseif ($$_ -match '^([a-zA-Z0-9_-]+):') { \
+			$$target = $$matches[1]; \
+			Write-Host -ForegroundColor Cyan $$target -NoNewline; \
+			Write-Host ': ' -NoNewline; \
+			Write-Host $$description \
 		} \
-		printf "\n"; \
-	}' \
-	| more $(shell test $(shell uname) = Darwin && echo '--no-init --raw-control-chars')
-
+	}"

@@ -3,15 +3,15 @@ version: "3.8"
 services:
   app:
     user: "${USER_ID:-1000}"
-    hostname: "${HOST_NAME:-emkademy}"
-    image: cybulde-template
+    hostname: "${HOST_NAME:-danbm}"
+    image: cybulde-model
     platform: linux/amd64
-    container_name: cybulde-template-container
+    container_name: cybulde-model-container
     build:
       context: .
       dockerfile: ./docker/Dockerfile
       args:
-        USER_NAME: "${USER_NAME:-kyuksel}"
+        USER_NAME: "${USER_NAME:-danbm}"
         USER_ID: "${USER_ID:-1000}"
     volumes:
       - ./:/app/
@@ -28,5 +28,3 @@ services:
               capabilities: [gpu]
     ipc: host
     init: true
-
-
