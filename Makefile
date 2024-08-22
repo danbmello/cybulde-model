@@ -1,5 +1,12 @@
 .PHONY: all entrypoint notebook sort sort-check format format-check format-and-sort lint check-type-annotations test full-check build build-for-dependencies lock-dependencies up down exec-in
 
+# Import some environment files:
+include .envs/.postgres
+include .envs/.mlflow-common
+include .envs/.mlflow-dev
+# include .envs/.infrastructure
+export
+
 SHELL = /usr/bin/env bash
 USER_NAME = $(USERNAME)
 USER_ID = 1000
@@ -7,20 +14,28 @@ HOST_NAME = $(COMPUTERNAME)
 
 DOCKER_COMPOSE_COMMAND = docker-compose
 
-SERVICE_NAME = app
-CONTAINER_NAME = cybulde-model-container
+PROD_SERVICE_NAME = app-prod
+PROD_CONTAINER_NAME = cybulde-model-prod-container
+PROD_PROFILE_NAME = prod
+
+ifeq ($(shell powershell -Command "[void](Get-Command nvidia-smi -ErrorAction SilentlyContinue); if ($$?) { echo found }"), found)
+		PROFILE = dev
+		CONTAINER_NAME = cybulde-model-dev-container
+		SERVICE_NAME = app-dev
+else
+		PROFILE = ci
+		CONTAINER_NAME = cybulde-model-ci-container
+		SERVICE_NAME = app-ci
+endif
+
 
 DIRS_TO_VALIDATE = cybulde
 DOCKER_COMPOSE_RUN = $(DOCKER_COMPOSE_COMMAND) run --rm $(SERVICE_NAME)
 DOCKER_COMPOSE_EXEC = $(DOCKER_COMPOSE_COMMAND) exec $(SERVICE_NAME)
 
-# Local docker image name
-LOCAL_DOCKER_IMAGE_NAME = cybulde-data-processing
+DOCKER_COMPOSE_RUN_PROD = $(DOCKER_COMPOSE_COMMAND) run --rm $(PROD_SERVICE_NAME)
+DOCKER_COMPOSE_EXEC_PROD = $(DOCKER_COMPOSE_COMMAND) exec $(PROD_SERVICE_NAME)
 
-# Docker image name
-GCP_DOCKER_IMAGE_NAME = southamerica-east1-docker.pkg.dev/cybulde-428517/cybulde/cybulde-data-processing
-
-export
 
 # Returns true if the stem is a non-empty environment variable, or else raises an error.
 guard-%:
@@ -32,6 +47,10 @@ guard-%:
 	    echo $* is not set && \
 	    exit /b 1) && \
 	exit /b 0
+
+## Generate final config. For overrides use: OVERRIDES=<overrides>
+generate-final-config-local: up
+	$(DOCKER_COMPOSE_EXEC) python cybulde/generate_final_config.py ${OVERRIDES}
 
 ## Run tasks
 local-run-tasks: up
@@ -94,8 +113,15 @@ lock-dependencies: build-for-dependencies
 	$(DOCKER_COMPOSE_RUN) bash -c "if [ -e /home/$(USER_NAME)/poetry.lock.build ]; then cp /home/$(USER_NAME)/poetry.lock.build ./poetry.lock; else poetry lock; fi"
 
 ## Starts docker containers using "docker-compose up -d"
+# up:
+# 	$(DOCKER_COMPOSE_COMMAND) --profile $(PROFILE) up -d
+
 up:
-	$(DOCKER_COMPOSE_COMMAND) up -d
+ifeq (, $(shell powershell -Command "docker ps -a | Select-String -Pattern '$(CONTAINER_NAME)'"))
+	@make down
+endif
+	@$(DOCKER_COMPOSE_COMMAND) --profile $(PROFILE) up -d --remove-orphans
+
 
 ## docker-compose down
 down:

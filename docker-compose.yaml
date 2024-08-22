@@ -1,24 +1,57 @@
-version: "3.8"
+volumes:
+  postgresql-mlflow-data:
+  mlflow-artifact-store:
+
+# Template for our app service
+#   Because we are going to use it differently in different cases
+#   (For example the use of GPUs - sometimes we won´t need it or it won't be available.)
+
+x-app-template: &APP_TEMPLATE # Named the template as APP_TEMPLATE
+  user: "${USER_ID:-1000}"
+  hostname: "${HOST_NAME:-danbm}"
+  image: cybulde-model
+  build:
+    context: .
+    dockerfile: ./docker/Dockerfile
+    args:
+      USER_NAME: "${USER_NAME:-danbm}"
+      USER_ID: "${USER_ID:-1000}"
+  env_file:
+    - .envs/.postgres
+    - .envs/.mlflow-common
+    - .envs/.mlflow-dev
+  volumes:
+    - ./:/app/
+    - mlflow-artifact-store:/mlflow-artifact-store
+    - ~/.config/gcloud/:/home/${USER_NAME}/.config/gcloud
+  ipc: host
+  init: true
 
 services:
-  app:
-    user: "${USER_ID:-1000}"
-    hostname: "${HOST_NAME:-danbm}"
-    image: cybulde-model
-    platform: linux/amd64
-    container_name: cybulde-model-container
-    build:
-      context: .
-      dockerfile: ./docker/Dockerfile
-      args:
-        USER_NAME: "${USER_NAME:-danbm}"
-        USER_ID: "${USER_ID:-1000}"
+  # Explained on the MLFlow section
+  mlflow-db:
+    container_name: mlflow-backend-store
+    image: postgres:14
+    env_file:
+      - .envs/.mlflow-common
+      - .envs/.mlflow-dev
+      - .envs/.postgres
     volumes:
-      - ./:/app/
-      - ~/.config/gcloud/:/home/${USER_NAME:-kyuksel}/.config/gcloud
+      - postgresql-mlflow-data:/var/lib/postgresql/data
     ports:
-      - 8080:8080
+      - 5433:5432
+    profiles:
+      - dev
 
+  # App service for local development
+  app-dev:
+    <<: *APP_TEMPLATE # Yaml syntax to use the template defined above. The template configs are visible here, that's why we don't need to specify them again.
+    container_name: cybulde-model-dev-container
+    ports:
+      - ${LOCAL_DEV_MLFLOW_SERVER_PORT}:${LOCAL_DEV_MLFLOW_SERVER_PORT}
+      - 8080:8080
+      - 8888:8888
+      - 8001:8001
     deploy:
       resources:
         reservations:
@@ -26,5 +59,27 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    ipc: host
-    init: true
+    profiles:
+      - dev
+
+  # App production service. Used for launch distributed model training on GCP.
+  app-prod:
+    <<: *APP_TEMPLATE
+    container_name: cybulde-model-prod-container
+    env_file:
+      - .envs/.mlflow-common
+      - .envs/.mlflow-prod
+      # - .envs/.infrastructure
+    ports:
+      - ${PROD_MLFLOW_SERVER_PORT}:${PROD_MLFLOW_SERVER_PORT}
+    profiles:
+      - prod
+
+  # App CI service. Used by GitHub machines for CI jobs.
+  app-ci:
+    <<: *APP_TEMPLATE
+    container_name: cybulde-model-ci-container
+    ports:
+      - ${LOCAL_DEV_MLFLOW_SERVER_PORT}:${LOCAL_DEV_MLFLOW_SERVER_PORT}
+    profiles:
+      - ci
