@@ -68,6 +68,9 @@ def copy_dir(source_dir: str, target_dir: str) -> None:
             raise ValueError(f"Source file {source_file} is not a file.")
 
 
+# Checks if the given path starts with "gs://"
+# If starts with "gs://", it creates a temporary directory in order to copy the contents of the given directory to a local path.
+# If doesn't starts with "gs://", it means that this data is already stored locally.
 def translate_gcs_dir_to_local(path: str) -> str:
     if path.startswith(GCS_PREFIX):
         path = path.rstrip("/")
